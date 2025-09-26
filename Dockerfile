@@ -1,49 +1,49 @@
-#!/bin/sh
-cd /app > /dev/null
+FROM node:22-alpine AS base
 
-cloudflaredargo(){
-if [ ! -e ./bot ]; then
-case $(uname -m) in
-aarch64) cpu=arm64;;
-x86_64) cpu=amd64;;
-esac
-curl -L -o ./bot -# --retry 2 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$cpu
-chmod +x ./bot
-fi
-}
-cloudflaredargo
-if [ -n "$TUNNEL_TOKEN" ]; then
-  ./bot tunnel --edge-ip-version auto --no-autoupdate --protocol auto run --token $TUNNEL_TOKEN > ./botlog 2>&1 &
-else
-  ./bot tunnel --url http://localhost:$PORT --edge-ip-version auto --no-autoupdate --protocol http2 > ./botlog 2>&1 &
-  
-  echo "temp tunnel ..."
-  sleep 10
-  argodomain=$(grep -a trycloudflare.com "./botlog" 2>/dev/null | awk 'NR==2{print}' | awk -F// '{print $2}' | awk '{print $1}')
-  if [ -n "${argodomain}" ]; then
-  echo "get argo temp tunnel success !"
-  else
-  echo "get argo temp tunnel failed ..."
-  fi
-fi
+FROM base AS deps
 
-if [ -n "$PROXY_URL" ]; then
-export HOSTNAME="0.0.0.0";
-protocol=$(echo $PROXY_URL | cut -d: -f1);
-host=$(echo $PROXY_URL | cut -d/ -f3 | cut -d: -f1);
-port=$(echo $PROXY_URL | cut -d: -f3);
-conf=/etc/proxychains.conf;
-echo "strict_chain" > $conf;
-echo "proxy_dns" >> $conf;
-echo "remote_dns_subnet 224" >> $conf;
-echo "tcp_read_time_out 15000" >> $conf;
-echo "tcp_connect_time_out 8000" >> $conf;
-echo "localnet 127.0.0.0/255.0.0.0" >> $conf;
-echo "localnet ::1/128" >> $conf;
-echo "[ProxyList]" >> $conf;
-echo "$protocol $host $port" >> $conf;
-cat /etc/proxychains.conf;
-proxychains -f $conf node server.js;
-else
-node server.js;
-fi
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+COPY package.json yarn.lock ./
+
+# RUN echo "Current registry:" && yarn config get registry
+# RUN yarn config set registry 'https://mirrors.huaweicloud.com/repository/npm'
+RUN yarn install
+
+FROM base AS builder
+
+RUN apk update && apk add --no-cache git
+
+ENV OPENAI_API_KEY=""
+ENV GOOGLE_API_KEY=""
+ENV CODE=""
+ENV ENABLE_MCP=""
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+RUN yarn build
+
+FROM base AS runner
+WORKDIR /app
+
+RUN apk add proxychains-ng
+
+ENV PROXY_URL=""
+ENV OPENAI_API_KEY=""
+ENV GOOGLE_API_KEY=""
+ENV CODE=""
+
+COPY run.sh ./
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/.next/server ./.next/server
+RUN mkdir -p /app/app/mcp && chmod 777 /app/app/mcp /app/run.sh
+
+
+EXPOSE 3000
+
+ENTRYPOINT ["/app/run.sh"]
