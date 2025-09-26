@@ -36,7 +36,6 @@ ENV OPENAI_API_KEY=""
 ENV GOOGLE_API_KEY=""
 ENV CODE=""
 
-COPY bot ./
 COPY run.sh ./
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
