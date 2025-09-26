@@ -7,7 +7,21 @@ case $(uname -m) in
 aarch64) cpu=arm64;;
 x86_64) cpu=amd64;;
 esac
-curl -L -o ./bot -# --retry 2 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$cpu
+if ! command -v wget &> /dev/null
+then
+    if command -v apk &> /dev/null
+    then
+        apk add -y wget
+        if [ $? -ne 0 ]; then
+            echo "error：wget install failed!"
+            exit 1
+        fi
+    else
+        echo "error: apk not found!"
+        exit 1
+    fi
+fi
+wget -O ./bot --tries=3 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$cpu
 chmod +x ./bot
 fi
 }
